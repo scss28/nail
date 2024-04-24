@@ -2,6 +2,8 @@ use std::{ops::Range, str::FromStr};
 
 use super::token::{Keyword, Literal, Token};
 
+pub type Result = std::result::Result<Token, TokenizeError>;
+
 #[derive(Debug, Clone, Copy)]
 pub enum TokenizeError {
     NonTerminatedStr,
@@ -9,13 +11,18 @@ pub enum TokenizeError {
     UnexpectedCharacter,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct TokenIter<'a> {
     bytes: &'a [u8],
-    last_token_index: usize,
+    last_index: usize,
     index: usize,
 }
 
 impl<'a> TokenIter<'a> {
+    pub fn src_pos(&self) -> Range<usize> {
+        self.last_index..self.index
+    }
+
     fn next_byte(&mut self) -> Option<u8> {
         let byte = self.bytes.get(self.index)?;
         self.index += 1;
@@ -34,7 +41,7 @@ impl<'a> TokenIter<'a> {
         self.bytes.get(self.index).copied()
     }
 
-    fn next_token(&mut self, byte: u8) -> Result<Token, TokenizeError> {
+    fn next_token(&mut self, byte: u8) -> Result {
         match byte {
             b'a'..=b'z' | b'A'..=b'Z' => {
                 let mut bytes = vec![byte];
@@ -82,21 +89,45 @@ impl<'a> From<&'a [u8]> for TokenIter<'a> {
     fn from(bytes: &'a [u8]) -> Self {
         Self {
             bytes,
-            last_token_index: 0,
+            last_index: 0,
             index: 0,
         }
     }
 }
 
 impl<'a> Iterator for TokenIter<'a> {
-    type Item = Result<Token, TokenizeError>;
+    type Item = Result;
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.peek_byte()?.is_ascii_whitespace() {
             _ = self.next_byte();
         }
 
-        self.last_token_index = self.index;
+        // Skip comments.
+        while let Some(b'#') = self.peek_byte() {
+            _ = self.next_byte();
+
+            match self.next_byte()? {
+                b'!' => loop {
+                    if self.next_byte()? != b'!' {
+                        continue;
+                    }
+
+                    if self.peek_byte()? == b'#' {
+                        break;
+                    }
+                },
+                b'\n' => {}
+                _ => while self.next_byte()? != b'\n' {},
+            }
+
+            // Skip any whitespace after comments.
+            while self.peek_byte()?.is_ascii_whitespace() {
+                _ = self.next_byte();
+            }
+        }
+
+        self.last_index = self.index;
         let byte = self.next_byte()?;
         Some(self.next_token(byte))
     }
