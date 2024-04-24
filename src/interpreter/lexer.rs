@@ -1,6 +1,9 @@
 use std::{ops::Range, str::FromStr};
 
-use super::token::{Keyword, Literal, Token};
+use super::{
+    token::{Keyword, Token},
+    Value,
+};
 
 pub type Result = std::result::Result<Token, TokenizeError>;
 
@@ -68,7 +71,7 @@ impl<'a> TokenIter<'a> {
                                 return Err(TokenizeError::NonUTF8);
                             };
 
-                            return Ok(Token::Literal(Literal::Str(str.into_boxed_str())));
+                            return Ok(Token::Literal(Value::Str(str.into_boxed_str())));
                         }
                         byte => bytes.push(byte),
                     }
@@ -80,6 +83,10 @@ impl<'a> TokenIter<'a> {
             b',' => Ok(Token::Comma),
             b':' => Ok(Token::Colon),
             b';' => Ok(Token::SemiColon),
+            b'@' => Ok(Token::At),
+            b'(' => Ok(Token::LeftSmooth),
+            b')' => Ok(Token::RightSmooth),
+            b'?' => Ok(Token::QuestionMark),
             _ => Err(TokenizeError::UnexpectedCharacter),
         }
     }

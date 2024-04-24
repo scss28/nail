@@ -1,19 +1,20 @@
 use std::str::FromStr;
 
+use super::Value;
+
 #[derive(Debug, Clone)]
 pub enum Token {
-    Literal(Literal),
+    Literal(Value),
     Identifier(Box<str>),
     Keyword(Keyword),
     Star,
     Comma,
     Colon,
     SemiColon,
-}
-
-#[derive(Debug, Clone)]
-pub enum Literal {
-    Str(Box<str>),
+    At,
+    LeftSmooth,
+    RightSmooth,
+    QuestionMark,
 }
 
 #[derive(Debug, Clone, Copy)]

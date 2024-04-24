@@ -1,34 +1,36 @@
-use std::collections::HashMap;
+use super::Value;
+use std::{alloc, collections::HashMap};
 
 #[derive(Debug, Clone)]
 pub enum Command {
     New {
         identifier: Box<str>,
-        columns: HashMap<Box<str>, Ty>,
+        columns: HashMap<Box<str>, (bool, Ty)>,
     },
     Insert {
         identifier: Box<str>,
-        values: Vec<Expression>,
+        inserts: Vec<HashMap<Box<str>, Expression>>,
     },
     Get {
         identifier: Box<str>,
-        selection: Vec<Selection>,
+        selections: Vec<Selection>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Literal(),
+    Literal(Value),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Ty {
     Str,
+    Nil,
 }
 
 #[derive(Debug, Clone)]
 pub enum Selection {
     Column(Box<str>),
-    Id,
+    RowAttribute(Box<str>),
     All,
 }
