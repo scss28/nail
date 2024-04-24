@@ -3,9 +3,11 @@ mod span;
 
 fn main() {
     let src = r#"
-        new table Table x: str, y: str;
-        from Table get x, y;
+        new Student name str, surname str;
+        insert Student "Gaming", "Fungus";
+
+        from Student get @id;
     "#;
 
-    interpreter::run(src);
+    interpreter::run(src).expect("Running went oof");
 }

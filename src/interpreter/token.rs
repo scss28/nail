@@ -23,6 +23,7 @@ pub enum Keyword {
     Table,
     Str,
     New,
+    Insert,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -37,6 +38,7 @@ impl FromStr for Keyword {
             "table" => Keyword::Table,
             "str" => Keyword::Str,
             "new" => Keyword::New,
+            "insert" => Keyword::Insert,
             _ => return Err(NoSuchKeywordError),
         })
     }
