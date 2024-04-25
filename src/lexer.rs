@@ -1,5 +1,7 @@
 use std::{ops::Range, str::FromStr};
 
+use crate::Ty;
+
 use super::{
     token::{Keyword, Token},
     Value,
@@ -12,6 +14,8 @@ pub enum TokenizeError {
     NonTerminatedStr,
     NonUTF8,
     UnexpectedCharacter,
+    InvalidFloatLiteral,
+    InvalidIntLiteral,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,13 +58,17 @@ impl<'a> TokenIter<'a> {
                     bytes.push(byte);
                 }
 
-                // Safe since it can only have utf-8 bytes.
-                let str = unsafe { String::from_utf8_unchecked(bytes) };
-                if let Ok(keyword) = Keyword::from_str(&str) {
+                // It can only have utf-8 bytes because of the code above.
+                let str = unsafe { std::str::from_utf8_unchecked(&bytes) };
+                if let Ok(keyword) = Keyword::from_str(str) {
                     return Ok(Token::Keyword(keyword));
                 }
 
-                Ok(Token::Identifier(str.into_boxed_str()))
+                if let Ok(ty) = Ty::from_str(str) {
+                    return Ok(Token::Ty(ty));
+                }
+
+                Ok(Token::Identifier(str.to_owned()))
             }
             b'"' => {
                 let mut bytes = Vec::new();
@@ -71,13 +79,41 @@ impl<'a> TokenIter<'a> {
                                 return Err(TokenizeError::NonUTF8);
                             };
 
-                            return Ok(Token::Literal(Value::Str(str.into_boxed_str())));
+                            return Ok(Token::Literal(Value::Str(str)));
                         }
                         byte => bytes.push(byte),
                     }
                 }
 
                 Err(TokenizeError::NonTerminatedStr)
+            }
+            b'0'..=b'9' => {
+                let mut bytes = vec![byte];
+                let mut dot = false;
+                while let Some(byte) = self.next_byte_if(|byte| matches!(byte, b'.' | b'0'..=b'9'))
+                {
+                    match (byte, dot) {
+                        (b'.', false) => dot = true,
+                        (b'.', true) => break,
+                        _ => {}
+                    }
+
+                    bytes.push(byte);
+                }
+
+                if dot {
+                    // It can only have utf-8 bytes because of the code above.
+                    let Ok(float) = unsafe { std::str::from_utf8_unchecked(&bytes) }.parse() else {
+                        return Err(TokenizeError::InvalidFloatLiteral);
+                    };
+
+                    return Ok(Token::Literal(Value::Float(float)));
+                }
+
+                let Ok(int) = unsafe { std::str::from_utf8_unchecked(&bytes) }.parse() else {
+                    return Err(TokenizeError::InvalidIntLiteral);
+                };
+                Ok(Token::Literal(Value::Int(int)))
             }
             b'*' => Ok(Token::Star),
             b',' => Ok(Token::Comma),

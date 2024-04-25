@@ -1,7 +1,9 @@
-use std::{collections::HashMap, iter::Peekable, ops::Range, process::id};
+use std::{ops::Range, str::FromStr};
+
+use crate::command::RowAttribute;
 
 use super::{
-    command::{Command, Expression, Selection, Ty},
+    command::{ColumnDefinition, Command, Expression, Insertion, Selection},
     lexer::{self, TokenIter, TokenizeError},
     token::{Keyword, Token},
     Value,
@@ -11,6 +13,7 @@ use super::{
 pub enum ParseError {
     TokenizeError(TokenizeError),
     ExpectedToken(String),
+    NoSuchRowAttribute,
 }
 
 impl From<TokenizeError> for ParseError {
@@ -102,7 +105,7 @@ impl<'a> CommandIter<'a> {
 
                     selections.push(expect_token! {
                         self.next_token(),
-                        "* / column name",
+                        "* / <column name> / @<row attribute>",
                         Token::Identifier(identifier)
                             | Token::Literal(Value::Str(identifier)) => {
                             Selection::Column(identifier)
@@ -111,10 +114,14 @@ impl<'a> CommandIter<'a> {
                         Token::At => {
                             let attribute = expect_token! {
                                 self.next_token(),
-                                "row attribute",
+                                "<row attribute>",
                                 Token::Identifier(identifier)
                                     | Token::Literal(Value::Str(identifier)) => identifier
                             }?;
+
+                            let Ok(attribute) = RowAttribute::from_str(&attribute) else  {
+                                return Err(ParseError::NoSuchRowAttribute);
+                            };
 
                             Selection::RowAttribute(attribute)
                         }
@@ -127,6 +134,12 @@ impl<'a> CommandIter<'a> {
                 }
             }
             Keyword::New => {
+                expect_token! {
+                    self.next_token(),
+                    "table",
+                    Token::Keyword(Keyword::Table) => {}
+                }?;
+
                 let identifier = expect_token! {
                     self.next_token(),
                     "identifier",
@@ -134,13 +147,13 @@ impl<'a> CommandIter<'a> {
                         | Token::Literal(Value::Str(identifier)) => identifier
                 }?;
 
-                let mut columns = HashMap::new();
+                let mut definitions = Vec::new();
                 while let Some(token) = self.peek_token() {
                     if let Ok(Token::SemiColon) = token {
                         break;
                     }
 
-                    if !columns.is_empty() {
+                    if !definitions.is_empty() {
                         let Ok(Token::Comma) = token else {
                             return Err(ParseError::ExpectedToken(",".to_owned()));
                         };
@@ -155,10 +168,16 @@ impl<'a> CommandIter<'a> {
                             | Token::Literal(Value::Str(identifier)) => identifier
                     }?;
 
+                    expect_token! {
+                        self.next_token(),
+                        ":",
+                        Token::Colon => {}
+                    }?;
+
                     let ty = expect_token! {
                         self.next_token(),
                         "type",
-                        Token::Keyword(Keyword::Str) => Ty::Str,
+                        Token::Ty(ty) => ty,
                     }?;
 
                     let optional = if matches!(self.peek_token(), Some(Ok(Token::QuestionMark))) {
@@ -168,12 +187,16 @@ impl<'a> CommandIter<'a> {
                         false
                     };
 
-                    columns.insert(identifier, (optional, ty));
+                    definitions.push(ColumnDefinition {
+                        identifier,
+                        optional,
+                        ty,
+                    });
                 }
 
                 Command::New {
                     identifier,
-                    columns,
+                    definitions,
                 }
             }
             Keyword::Insert => {
@@ -184,13 +207,13 @@ impl<'a> CommandIter<'a> {
                         | Token::Literal(Value::Str(identifier)) => identifier
                 }?;
 
-                let mut inserts = Vec::new();
+                let mut insertions = Vec::new();
                 while let Some(token) = self.peek_token() {
                     if let Ok(Token::SemiColon) = token {
                         break;
                     }
 
-                    if !inserts.is_empty() {
+                    if !insertions.is_empty() {
                         let Ok(Token::Comma) = token else {
                             return Err(ParseError::ExpectedToken(",".to_owned()));
                         };
@@ -204,7 +227,7 @@ impl<'a> CommandIter<'a> {
                         Token::LeftSmooth => {}
                     }?;
 
-                    let mut expressions = HashMap::new();
+                    let mut expressions = Vec::new();
                     while let Some(token) = self.peek_token() {
                         if let Ok(Token::RightSmooth) = token {
                             break;
@@ -231,7 +254,10 @@ impl<'a> CommandIter<'a> {
                             Token::Colon => {}
                         }?;
 
-                        expressions.insert(identifier, self.next_expression()?);
+                        expressions.push(Insertion {
+                            identifier,
+                            expression: self.next_expression()?,
+                        });
                     }
 
                     expect_token! {
@@ -240,12 +266,12 @@ impl<'a> CommandIter<'a> {
                         Token::RightSmooth => {}
                     }?;
 
-                    inserts.push(expressions);
+                    insertions.push(expressions);
                 }
 
                 Command::Insert {
                     identifier,
-                    inserts,
+                    insertions,
                 }
             }
             _ => return Err(ParseError::ExpectedToken("from / insert / new".to_owned())),
@@ -260,9 +286,13 @@ impl<'a> Iterator for CommandIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let token = self.next_token()?;
-        let command = self.next_command(token);
+        let command = match self.next_command(token) {
+            Ok(command) => command,
+            Err(err) => return Some(Err(err)),
+        };
+
         Some(match self.next_token() {
-            Some(Ok(Token::SemiColon)) | None => command,
+            Some(Ok(Token::SemiColon)) | None => Ok(command),
             Some(Err(err)) => Err(err.into()),
             _ => Err(ParseError::ExpectedToken(";".to_owned())),
         })
