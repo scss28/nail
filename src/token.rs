@@ -1,5 +1,4 @@
 use super::Value;
-use crate::Ty;
 use std::str::FromStr;
 
 #[derive(Debug, Clone)]
@@ -7,7 +6,6 @@ pub enum Token {
     Literal(Value),
     Identifier(String),
     Keyword(Keyword),
-    Ty(Ty),
     Star,
     Comma,
     Colon,
@@ -25,6 +23,12 @@ pub enum Keyword {
     Table,
     New,
     Insert,
+    // Types
+    // :
+    Str,
+    Int,
+    Float,
+    Nil,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +43,10 @@ impl FromStr for Keyword {
             "table" => Keyword::Table,
             "new" => Keyword::New,
             "insert" => Keyword::Insert,
+            "str" => Keyword::Str,
+            "int" => Keyword::Int,
+            "float" => Keyword::Float,
+            "nil" => Keyword::Nil,
             _ => return Err(NoSuchKeywordError),
         })
     }

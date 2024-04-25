@@ -1,11 +1,9 @@
-use std::{ops::Range, str::FromStr};
-
-use crate::Ty;
-
 use super::{
     token::{Keyword, Token},
     Value,
 };
+
+use std::{ops::Range, str::FromStr};
 
 pub type Result = std::result::Result<Token, TokenizeError>;
 
@@ -26,6 +24,14 @@ pub struct TokenIter<'a> {
 }
 
 impl<'a> TokenIter<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes: bytes.as_ref(),
+            last_index: 0,
+            index: 0,
+        }
+    }
+
     pub fn src_pos(&self) -> Range<usize> {
         self.last_index..self.index
     }
@@ -48,28 +54,8 @@ impl<'a> TokenIter<'a> {
         self.bytes.get(self.index).copied()
     }
 
-    fn next_token(&mut self, byte: u8) -> Result {
+    fn next_token(&mut self, mut byte: u8) -> Result {
         match byte {
-            b'a'..=b'z' | b'A'..=b'Z' => {
-                let mut bytes = vec![byte];
-                while let Some(byte) = self.next_byte_if(
-                    |byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'),
-                ) {
-                    bytes.push(byte);
-                }
-
-                // It can only have utf-8 bytes because of the code above.
-                let str = unsafe { std::str::from_utf8_unchecked(&bytes) };
-                if let Ok(keyword) = Keyword::from_str(str) {
-                    return Ok(Token::Keyword(keyword));
-                }
-
-                if let Ok(ty) = Ty::from_str(str) {
-                    return Ok(Token::Ty(ty));
-                }
-
-                Ok(Token::Identifier(str.to_owned()))
-            }
             b'"' => {
                 let mut bytes = Vec::new();
                 while let Some(byte) = self.next_byte() {
@@ -123,17 +109,40 @@ impl<'a> TokenIter<'a> {
             b'(' => Ok(Token::LeftSmooth),
             b')' => Ok(Token::RightSmooth),
             b'?' => Ok(Token::QuestionMark),
-            _ => Err(TokenizeError::UnexpectedCharacter),
-        }
-    }
-}
+            b'A'..=b'Z' | b'a'..=b'z' | b'_' | 128.. => {
+                let mut bytes = vec![byte];
+                loop {
+                    let count = match byte {
+                        0b00000000..=0b01111111 => 1,
+                        0b11000000..=0b11011111 => 2,
+                        0b11100000..=0b11101111 => 3,
+                        _ => 4,
+                    };
 
-impl<'a> From<&'a [u8]> for TokenIter<'a> {
-    fn from(bytes: &'a [u8]) -> Self {
-        Self {
-            bytes,
-            last_index: 0,
-            index: 0,
+                    for _ in 0..count - 1 {
+                        bytes.push(self.next_byte().ok_or(TokenizeError::NonUTF8)?);
+                    }
+
+                    byte = match self.next_byte_if(
+                        |byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'_' | 128..),
+                    ) {
+                        Some(byte) => {
+                            bytes.push(byte);
+                            byte
+                        }
+                        None => break,
+                    };
+                }
+
+                // It can only have utf-8 bytes because of the code above.
+                let str = unsafe { std::str::from_utf8_unchecked(&bytes) };
+                if let Ok(keyword) = Keyword::from_str(str) {
+                    return Ok(Token::Keyword(keyword));
+                }
+
+                Ok(Token::Identifier(str.to_owned()))
+            }
+            _ => Err(TokenizeError::UnexpectedCharacter),
         }
     }
 }

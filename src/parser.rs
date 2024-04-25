@@ -1,9 +1,9 @@
-use std::{ops::Range, str::FromStr};
+use std::{collections::HashMap, ops::Range, str::FromStr};
 
-use crate::command::RowAttribute;
+use crate::{command::RowAttribute, Ty};
 
 use super::{
-    command::{ColumnDefinition, Command, Expression, Insertion, Selection},
+    command::{ColumnDefinition, Command, Expression, Selection},
     lexer::{self, TokenIter, TokenizeError},
     token::{Keyword, Token},
     Value,
@@ -65,7 +65,8 @@ impl<'a> CommandIter<'a> {
         expect_token! {
             self.next_token(),
             "expression",
-            Token::Literal(literal) => Expression::Literal(literal)
+            Token::Literal(value) => Expression::Value(value),
+            Token::Keyword(Keyword::Nil) => Expression::Value(Value::Nil)
         }
     }
 
@@ -177,7 +178,9 @@ impl<'a> CommandIter<'a> {
                     let ty = expect_token! {
                         self.next_token(),
                         "type",
-                        Token::Ty(ty) => ty,
+                        Token::Keyword(Keyword::Str) => Ty::Str,
+                        Token::Keyword(Keyword::Int) => Ty::Int,
+                        Token::Keyword(Keyword::Float) => Ty::Float,
                     }?;
 
                     let optional = if matches!(self.peek_token(), Some(Ok(Token::QuestionMark))) {
@@ -227,13 +230,13 @@ impl<'a> CommandIter<'a> {
                         Token::LeftSmooth => {}
                     }?;
 
-                    let mut expressions = Vec::new();
+                    let mut insertion = HashMap::new();
                     while let Some(token) = self.peek_token() {
                         if let Ok(Token::RightSmooth) = token {
                             break;
                         }
 
-                        if !expressions.is_empty() {
+                        if !insertion.is_empty() {
                             let Ok(Token::Comma) = token else {
                                 return Err(ParseError::ExpectedToken(",".to_owned()));
                             };
@@ -254,10 +257,7 @@ impl<'a> CommandIter<'a> {
                             Token::Colon => {}
                         }?;
 
-                        expressions.push(Insertion {
-                            identifier,
-                            expression: self.next_expression()?,
-                        });
+                        insertion.insert(identifier, self.next_expression()?);
                     }
 
                     expect_token! {
@@ -266,7 +266,7 @@ impl<'a> CommandIter<'a> {
                         Token::RightSmooth => {}
                     }?;
 
-                    insertions.push(expressions);
+                    insertions.push(insertion);
                 }
 
                 Command::Insert {

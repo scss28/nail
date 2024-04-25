@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
 use crate::Ty;
 
@@ -12,18 +12,12 @@ pub enum Command {
     },
     Insert {
         identifier: String,
-        insertions: Vec<Vec<Insertion>>,
+        insertions: Vec<HashMap<String, Expression>>,
     },
     Get {
         identifier: String,
         selections: Vec<Selection>,
     },
-}
-
-#[derive(Debug, Clone)]
-pub struct Insertion {
-    pub identifier: String,
-    pub expression: Expression,
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +29,7 @@ pub struct ColumnDefinition {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Literal(Value),
+    Value(Value),
 }
 
 #[derive(Debug, Clone)]
