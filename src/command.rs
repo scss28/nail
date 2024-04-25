@@ -12,7 +12,7 @@ pub enum Command {
     },
     Insert {
         identifier: String,
-        insertions: Vec<HashMap<String, Expression>>,
+        insertion: HashMap<String, Expression>,
     },
     Get {
         identifier: String,
@@ -34,8 +34,14 @@ pub enum Expression {
 
 #[derive(Debug, Clone)]
 pub enum Selection {
-    Column(String),
-    RowAttribute(RowAttribute),
+    Column {
+        column: String,
+        identifier: Option<String>,
+    },
+    RowAttribute {
+        attribute: RowAttribute,
+        identifier: Option<String>,
+    },
     All,
 }
 

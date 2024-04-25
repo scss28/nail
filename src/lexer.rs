@@ -1,3 +1,5 @@
+use parse_display_derive::Display;
+
 use super::{
     token::{Keyword, Token},
     Value,
@@ -7,12 +9,17 @@ use std::{ops::Range, str::FromStr};
 
 pub type Result = std::result::Result<Token, TokenizeError>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Display, Clone, Copy)]
 pub enum TokenizeError {
+    #[display("Non-terminated str literal.")]
     NonTerminatedStr,
+    #[display("Non-UTF-8 text.")]
     NonUTF8,
+    #[display("Character not part of the language grammar.")]
     UnexpectedCharacter,
+    #[display("Invalid float literal.")]
     InvalidFloatLiteral,
+    #[display("Invalid int literal.")]
     InvalidIntLiteral,
 }
 

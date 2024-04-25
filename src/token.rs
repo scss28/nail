@@ -23,8 +23,9 @@ pub enum Keyword {
     Table,
     New,
     Insert,
+    As,
     // Types
-    // :
+    // -----@
     Str,
     Int,
     Float,
@@ -43,6 +44,9 @@ impl FromStr for Keyword {
             "table" => Keyword::Table,
             "new" => Keyword::New,
             "insert" => Keyword::Insert,
+            "as" => Keyword::As,
+            // Types
+            // -----@
             "str" => Keyword::Str,
             "int" => Keyword::Int,
             "float" => Keyword::Float,

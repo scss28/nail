@@ -8,20 +8,22 @@ fn main() {
             surname: str, 
             age: int,
             job: str?; # optional column
-        
+
         # To insert some rows simply:
         insert Person
-            (name: "Joe", surname: "Kowalski", age: 35, job: "Police Officer"),
-            (name: "Croki", surname: "Actimel", age: 135, job: "Pilot"),
-            # Jobless :(
-            (name: "Bob", surname: "Bob", age: 88), 
-            (name: "Suzuki", surname: "Satoru", age: 45, job: "Salaryman");
-        
-        
+            name: "Joe", surname: "Kowalski", age: 35, job: "Police Officer";
+        insert Person
+            name: "Croki", surname: "Actimel", age: 135, job: "Pilot";
+        insert Person
+            name: "Bob", surname: "Bob", age: 88;
+        insert Person
+            name: "Suzuki", surname: "Satoru", age: 45, job: "Salaryman";
+
+
         from Person get @Id, *;
         # RowAttribute --^   ^-- Gets all rows.
 
-        from Person get @Id, job;
+        from Person get @Id, job as "Jabba job";
         #      Just a row ----^
     "#;
 
@@ -33,27 +35,7 @@ fn main() {
         .collect::<Result<Vec<_>, _>>()
         .expect("syntax error")
     {
-        let output = match database.run_command(command).expect("run error") {
-            CommandRunOutput::RowsInserted { identifier, count } => {
-                format!("Inserted {count} rows into table \"{identifier}\".")
-            }
-            CommandRunOutput::TableCreated { identifier } => {
-                format!("Table \"{identifier}\" created.")
-            }
-            CommandRunOutput::Selection { rows } => rows
-                .into_iter()
-                .map(|row| {
-                    format!(
-                        "{}\n",
-                        row.into_iter()
-                            .map(|value| value.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                })
-                .collect::<String>(),
-        };
-
+        let output = database.run_command(command).expect("run error");
         println!("{output}");
     }
 }

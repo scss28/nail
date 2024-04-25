@@ -8,12 +8,27 @@ mod lexer;
 mod parser;
 mod token;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Ty {
     Str,
     Int,
     Float,
     Nil,
+}
+
+impl Display for Ty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Ty::Str => "str",
+                Ty::Int => "int",
+                Ty::Float => "float",
+                Ty::Nil => "nil",
+            }
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
