@@ -7,14 +7,42 @@ use crate::{
 };
 use std::{collections::HashMap, fmt::Display};
 
-#[derive(Debug, Display, Clone)]
+#[derive(Debug, Clone)]
 pub enum CommandRunOutput {
-    #[display("Inserted a row into table \"{identifier}\".")]
-    RowInserted { identifier: String },
-    #[display("Table \"{identifier}\" created.")]
-    TableCreated { identifier: String },
-    #[display("{table}")]
-    Selection { table: Table },
+    RowsInserted {
+        identifier: String,
+        count: usize,
+        errs: Vec<OneOf<(InsertionError, NoSuchColumnError)>>,
+    },
+    TableCreated {
+        identifier: String,
+    },
+    Selection {
+        table: Table,
+    },
+}
+
+impl Display for CommandRunOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CommandRunOutput::RowsInserted {
+                identifier,
+                count,
+                errs,
+            } => {
+                for err in errs {
+                    write!(f, "Insertion failed: {err}")?;
+                }
+
+                write!(f, "\nInserted {count} rows into table \"{identifier}\".")?;
+                Ok(())
+            }
+            CommandRunOutput::TableCreated { identifier } => {
+                write!(f, "Table \"{identifier}\" created.")
+            }
+            CommandRunOutput::Selection { table } => write!(f, "{table}"),
+        }
+    }
 }
 
 #[derive(Debug, Display, Clone)]
@@ -74,14 +102,28 @@ impl Database {
             }
             Command::Insert {
                 identifier,
-                insertion,
+                insertions,
             } => {
                 let Some(table) = self.tables.get_mut(&identifier) else {
                     return Err(OneOf::new(NoSuchTableError(identifier)));
                 };
 
-                table.insert(insertion).map_err(OneOf::broaden)?;
-                Ok(CommandRunOutput::RowInserted { identifier })
+                let mut errs = Vec::new();
+                let mut count = 0;
+                for insertion in insertions {
+                    let Err(err) = table.insert(insertion) else {
+                        count += 1;
+                        continue;
+                    };
+
+                    errs.push(err);
+                }
+
+                Ok(CommandRunOutput::RowsInserted {
+                    identifier,
+                    count,
+                    errs,
+                })
             }
             Command::Get {
                 identifier,
@@ -308,6 +350,15 @@ impl Display for Table {
                 write!(f, "|")?;
             }
             writeln!(f)?;
+        }
+
+        write!(f, " ")?;
+        for max_width in &max_widths {
+            for _ in 0..max_width + PADDING * 2 {
+                write!(f, "-")?;
+            }
+
+            write!(f, " ")?;
         }
 
         Ok(())

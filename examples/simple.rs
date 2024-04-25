@@ -9,22 +9,20 @@ fn main() {
             age: int,
             job: str?; # optional column
 
-        # To insert some rows simply:
-        insert Person
+        # To insert some rows simply
+        insert Person (
             name: "Joe", surname: "Kowalski", age: 35, job: "Police Officer";
-        insert Person
             name: "Croki", surname: "Actimel", age: 135, job: "Pilot";
-        insert Person
-            name: "Bob", surname: "Bob", age: 88;
-        insert Person
+            # No job :(
+            name: "Bob", surname: "Bob", age: 9000;
             name: "Suzuki", surname: "Satoru", age: 45, job: "Salaryman";
-
+        );
 
         from Person get @Id, *;
         # RowAttribute --^   ^-- Gets all rows.
 
         from Person get @Id, job as "Jabba job";
-        #      Just a row ----^
+        #   Just a column ----^
     "#;
 
     let mut database = Database::new();

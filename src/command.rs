@@ -12,7 +12,7 @@ pub enum Command {
     },
     Insert {
         identifier: String,
-        insertion: HashMap<String, Expression>,
+        insertions: Vec<HashMap<String, Expression>>,
     },
     Get {
         identifier: String,

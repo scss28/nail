@@ -75,16 +75,52 @@ impl<'a> CommandIter<'a> {
         }
     }
 
+    fn next_insertion(&mut self) -> Result<HashMap<String, Expression>, ParseError> {
+        let mut insertion = HashMap::new();
+        while let Some(token) = self.peek_token() {
+            if let Ok(Token::SemiColon) = token {
+                break;
+            }
+
+            if !insertion.is_empty() {
+                let Ok(Token::Comma) = token else {
+                    return Err(ParseError::ExpectedToken(",".to_owned()));
+                };
+
+                _ = self.next_token();
+            }
+
+            let identifier = expect_token! {
+                self.next_token(),
+                "<identifier>",
+                Token::Identifier(identifier)
+                    | Token::Literal(Value::Str(identifier)) => identifier
+            }?;
+
+            expect_token! {
+                self.next_token(),
+                ":",
+                Token::Colon => {}
+            }?;
+
+            insertion.insert(identifier, self.next_expression()?);
+        }
+
+        Ok(insertion)
+    }
+
     fn next_command(&mut self, token: Result<Token, TokenizeError>) -> Result<Command, ParseError> {
         let Token::Keyword(keyword) = token? else {
-            return Err(ParseError::ExpectedToken("from / insert / new".to_owned()));
+            return Err(ParseError::ExpectedToken(
+                "from or insert or new".to_owned(),
+            ));
         };
 
         let command = match keyword {
             Keyword::From => {
                 let identifier = expect_token! {
                     self.next_token(),
-                    "identifier",
+                    "<identifier>",
                     Token::Identifier(identifier)
                         | Token::Literal(Value::Str(identifier)) => identifier
                 }?;
@@ -111,7 +147,7 @@ impl<'a> CommandIter<'a> {
 
                     selections.push(expect_token! {
                         self.next_token(),
-                        "* / <column name> / @<row attribute>",
+                        "* or <column name> or @<row attribute>",
                         Token::Identifier(column)
                             | Token::Literal(Value::Str(column)) => {
                             let identifier = if let Some(
@@ -120,7 +156,7 @@ impl<'a> CommandIter<'a> {
                                 _ = self.next_token();
                                 Some(expect_token! {
                                     self.next_token(),
-                                    "identifier",
+                                    "<identifier>",
                                     Token::Identifier(identifier)
                                     | Token::Literal(Value::Str(identifier)) => {
                                         identifier
@@ -154,7 +190,7 @@ impl<'a> CommandIter<'a> {
                                 _ = self.next_token();
                                 Some(expect_token! {
                                     self.next_token(),
-                                    "identifier",
+                                    "<identifier>",
                                     Token::Identifier(identifier)
                                     | Token::Literal(Value::Str(identifier)) => {
                                         identifier
@@ -187,7 +223,7 @@ impl<'a> CommandIter<'a> {
 
                 let identifier = expect_token! {
                     self.next_token(),
-                    "identifier",
+                    "<identifier>",
                     Token::Identifier(identifier)
                         | Token::Literal(Value::Str(identifier)) => identifier
                 }?;
@@ -208,7 +244,7 @@ impl<'a> CommandIter<'a> {
 
                     let identifier = expect_token! {
                         self.next_token(),
-                        "identifier",
+                        "<identifier>",
                         Token::Identifier(identifier)
                             | Token::Literal(Value::Str(identifier)) => identifier
                     }?;
@@ -221,7 +257,7 @@ impl<'a> CommandIter<'a> {
 
                     let ty = expect_token! {
                         self.next_token(),
-                        "type",
+                        "<type>",
                         Token::Keyword(Keyword::Str) => Ty::Str,
                         Token::Keyword(Keyword::Int) => Ty::Int,
                         Token::Keyword(Keyword::Float) => Ty::Float,
@@ -249,44 +285,36 @@ impl<'a> CommandIter<'a> {
             Keyword::Insert => {
                 let identifier = expect_token! {
                     self.next_token(),
-                    "identifier",
+                    "<identifier>",
                     Token::Identifier(identifier)
                         | Token::Literal(Value::Str(identifier)) => identifier
                 }?;
 
-                let mut insertion = HashMap::new();
-                while let Some(token) = self.peek_token() {
-                    if let Ok(Token::SemiColon) = token {
-                        break;
-                    }
-
-                    if !insertion.is_empty() {
-                        let Ok(Token::Comma) = token else {
-                            return Err(ParseError::ExpectedToken(",".to_owned()));
-                        };
-
+                let mut insertions = Vec::new();
+                match self.peek_token() {
+                    Some(Ok(Token::LeftSmooth)) => {
                         _ = self.next_token();
+                        while !matches!(self.peek_token(), Some(Ok(Token::RightSmooth)) | None) {
+                            insertions.push(self.next_insertion()?);
+                            expect_token! {
+                                self.next_token(),
+                                ";",
+                                Token::SemiColon => {}
+                            }?;
+                        }
+
+                        expect_token! {
+                            self.next_token(),
+                            ")",
+                            Token::RightSmooth => {}
+                        }?;
                     }
-
-                    let identifier = expect_token! {
-                        self.next_token(),
-                        "identifier",
-                        Token::Identifier(identifier)
-                            | Token::Literal(Value::Str(identifier)) => identifier
-                    }?;
-
-                    expect_token! {
-                        self.next_token(),
-                        ":",
-                        Token::Colon => {}
-                    }?;
-
-                    insertion.insert(identifier, self.next_expression()?);
+                    _ => insertions.push(self.next_insertion()?),
                 }
 
                 Command::Insert {
                     identifier,
-                    insertion,
+                    insertions,
                 }
             }
             _ => return Err(ParseError::ExpectedToken("from / insert / new".to_owned())),
