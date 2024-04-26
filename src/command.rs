@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
 use crate::Ty;
 
@@ -34,29 +34,7 @@ pub enum Selection {
         column: String,
         identifier: Option<String>,
     },
-    RowAttribute {
-        attribute: RowAttribute,
-        identifier: Option<String>,
-    },
     All,
-}
-
-#[derive(Debug, Clone)]
-pub enum RowAttribute {
-    Id,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct NoSuchRowAttributeError;
-impl FromStr for RowAttribute {
-    type Err = NoSuchRowAttributeError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "Id" => RowAttribute::Id,
-            _ => return Err(NoSuchRowAttributeError),
-        })
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,6 +53,7 @@ pub enum Operator {
 #[derive(Debug, Clone)]
 pub enum Expression {
     Value(Value),
+    Identifier(String),
     Enclosed(Box<Expression>),
     Operation {
         lhs: Box<Expression>,

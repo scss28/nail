@@ -19,11 +19,12 @@ fn main() {
             name: "Suzuki", surname: "Satoru", age: 45,  knows_kung_fu: false, job: "Salaryman";
         );
 
-        from Person get @Id, *;
-        # RowAttribute --^   ^-- Gets all rows.
+        #               v-- Identity of the row.
+        from Person get I, *;
+        #                  ^-- Gets all rows.
 
-        #   Just a column ----v
-        from Person get @Id, job as "Jabba job" where age > 40;
+        # Just a column ----v
+        from Person get I, job as "Jabba job" where age > 40;
         
     "#;
 

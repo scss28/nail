@@ -1,8 +1,8 @@
-use std::{collections::HashMap, ops::Range, str::FromStr};
+use std::{collections::HashMap, ops::Range};
 
 use parse_display_derive::Display;
 
-use crate::{command::RowAttribute, Ty};
+use crate::{command::Operator, Ty};
 
 use super::{
     command::{ColumnDefinition, Command, Expression, Selection},
@@ -66,7 +66,7 @@ impl<'a> CommandIter<'a> {
             .as_ref()
     }
 
-    fn next_expression(&mut self) -> Result<Expression, ParseError> {
+    fn next_single_expression(&mut self) -> Result<Expression, ParseError> {
         expect_token! {
             self.next_token(),
             "expression",
@@ -77,6 +77,38 @@ impl<'a> CommandIter<'a> {
             Token::Keyword(Keyword::True) => Expression::Value(Value::Bool(true)),
             Token::Keyword(Keyword::False) => Expression::Value(Value::Bool(false)),
         }
+    }
+
+    fn next_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut expression = self.next_single_expression()?;
+        loop {
+            let operator = match self.peek_token() {
+                Some(Ok(token)) => match token {
+                    Token::Eq => {
+                        _ = self.next_token();
+                        Operator::Eq
+                    }
+                    Token::Less => {
+                        _ = self.next_token();
+                        Operator::Less
+                    }
+                    Token::More => {
+                        _ = self.next_token();
+                        Operator::More
+                    }
+                    _ => break,
+                },
+                _ => break,
+            };
+
+            expression = Expression::Operation {
+                lhs: Box::new(expression),
+                operator,
+                rhs: Box::new(self.next_single_expression()?),
+            };
+        }
+
+        Ok(expression)
     }
 
     fn next_insertion(&mut self) -> Result<HashMap<String, Expression>, ParseError> {
@@ -172,47 +204,13 @@ impl<'a> CommandIter<'a> {
                             }
                         },
                         Token::Star => Selection::All,
-                        Token::At => {
-                            let attribute = expect_token! {
-                                self.next_token(),
-                                "<row attribute>",
-                                Token::Identifier(identifier)
-                                    | Token::StrLiteral(identifier) => identifier
-                            }?;
-
-                            let Ok(attribute) = RowAttribute::from_str(&attribute) else  {
-                                return Err(ParseError::NoSuchRowAttribute);
-                            };
-
-                            let identifier = if let Some(
-                                Ok(Token::Keyword(Keyword::As))
-                            ) = self.peek_token() {
-                                _ = self.next_token();
-                                Some(expect_token! {
-                                    self.next_token(),
-                                    "<identifier>",
-                                    Token::Identifier(identifier)
-                                    | Token::StrLiteral(identifier) => {
-                                        identifier
-                                    }
-                                }?)
-                            } else {
-                                None
-                            };
-
-
-                            Selection::RowAttribute {
-                                attribute,
-                                identifier
-                            }
-                        }
                     }?);
                 }
 
                 let filter = match self.peek_token() {
                     Some(Ok(Token::Keyword(Keyword::Where))) => {
                         _ = self.next_token();
-                        Some(Expression::Value(Value::Bool(true)))
+                        Some(self.next_expression()?)
                     }
                     _ => None,
                 };

@@ -2,7 +2,7 @@ use parse_display_derive::Display;
 use terrors::OneOf;
 
 use crate::{
-    command::{ColumnDefinition, Command, Expression, Operator, RowAttribute, Selection},
+    command::{ColumnDefinition, Command, Expression, Operator, Selection},
     Ty, Value,
 };
 use std::{collections::HashMap, fmt::Display};
@@ -187,19 +187,77 @@ impl Table {
         first.values.len()
     }
 
+    pub fn get_column(&self, identifier: &str) -> Option<&Column> {
+        self.columns.iter().find(
+            |Column {
+                 identifier: column_identifier,
+                 ..
+             }| *column_identifier == identifier,
+        )
+    }
+
     pub fn get(
         &self,
         selections: Vec<Selection>,
         filter: Option<Expression>,
     ) -> Result<Table, OneOf<(NoSuchColumnError, CannotEvaluateError, ExpectedBoolError)>> {
         let mut columns = Vec::new();
+        for selection in &selections {
+            match selection {
+                Selection::Column { column, .. } => {
+                    if column == "I" {
+                        columns.push(Column {
+                            identifier: "I".to_owned(),
+                            ty: Ty::Int,
+                            optional: false,
+                            values: Vec::new(),
+                        });
+                        continue;
+                    }
+
+                    let Some(Column {
+                        identifier,
+                        ty,
+                        optional,
+                        ..
+                    }) = self.get_column(column)
+                    else {
+                        return Err(OneOf::new(NoSuchColumnError(column.clone())));
+                    };
+
+                    columns.push(Column {
+                        identifier: identifier.clone(),
+                        ty: *ty,
+                        optional: *optional,
+                        values: Vec::new(),
+                    })
+                }
+                Selection::All => {
+                    for Column {
+                        identifier,
+                        ty,
+                        optional,
+                        ..
+                    } in &self.columns
+                    {
+                        columns.push(Column {
+                            identifier: identifier.clone(),
+                            ty: *ty,
+                            optional: *optional,
+                            values: Vec::new(),
+                        });
+                    }
+                }
+            }
+        }
+
         for i in 0..self.height() {
-            let mut row = Vec::new();
+            let mut row = HashMap::from([("I".to_owned(), Value::Int(i as i32))]);
             for column in &self.columns {
                 let Column {
                     identifier, values, ..
                 } = column;
-                row.push((identifier.clone(), values[i].clone()))
+                row.insert(identifier.clone(), values[i].clone());
             }
 
             if let Some(expression) = filter.clone() {
@@ -214,46 +272,15 @@ impl Table {
                 }
             }
 
-            for selection in selections {
-                match selection {
-                    Selection::Column { column, identifier } => {
-                        let Some(mut column) = self
-                            .columns
-                            .iter()
-                            .find(
-                                |Column {
-                                     identifier: column_identifier,
-                                     ..
-                                 }| *column_identifier == column,
-                            )
-                            .cloned()
-                        else {
-                            return Err(OneOf::new(NoSuchColumnError(column.clone())));
-                        };
+            for Column {
+                identifier, values, ..
+            } in &mut columns
+            {
+                let Some(value) = row.get(identifier) else {
+                    unreachable!();
+                };
 
-                        if let Some(identifier) = identifier {
-                            column.identifier = identifier;
-                        }
-
-                        columns.push(column.clone());
-                    }
-                    Selection::RowAttribute {
-                        attribute,
-                        identifier,
-                    } => match attribute {
-                        RowAttribute::Id => {
-                            columns.push(Column {
-                                identifier: identifier.unwrap_or("Id".into()),
-                                optional: false,
-                                ty: Ty::Int,
-                                values: (0..self.height() as i32).map(|i| Value::Int(i)).collect(),
-                            });
-                        }
-                    },
-                    Selection::All => {
-                        columns.extend(self.columns.clone());
-                    }
-                }
+                values.push(value.clone());
             }
         }
 
@@ -277,6 +304,7 @@ impl Table {
                             operator: _,
                             rhs: _,
                         } => todo!(),
+                        Expression::Identifier(_) => todo!(),
                     },
                 )
             })
@@ -359,10 +387,17 @@ impl Table {
     fn evaluate(
         expression: Expression,
         index: usize,
-        row: &Vec<(String, Value)>,
-    ) -> Result<Value, OneOf<(CannotEvaluateError,)>> {
+        row: &HashMap<String, Value>,
+    ) -> Result<Value, OneOf<(CannotEvaluateError, NoSuchColumnError)>> {
         match expression {
             Expression::Value(value) => Ok(value),
+            Expression::Identifier(identifer) => {
+                let Some(value) = row.get(&identifer) else {
+                    return Err(OneOf::new(NoSuchColumnError(identifer)));
+                };
+
+                Ok(value.clone())
+            }
             Expression::Enclosed(expression) => Self::evaluate(*expression, index, row),
             Expression::Operation { lhs, operator, rhs } => {
                 let lhs = Self::evaluate(*lhs, index, row)?;
