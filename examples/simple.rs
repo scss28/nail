@@ -7,33 +7,34 @@ fn main() {
             name: str, 
             surname: str, 
             age: int,
+            knows_kung_fu: bool,
             job: str?; # optional column
 
         # To insert some rows simply
         insert Person (
-            name: "Joe", surname: "Kowalski", age: 35, job: "Police Officer";
-            name: "Croki", surname: "Actimel", age: 135, job: "Pilot";
+            name: "Joe", surname: "Kowalski", age: 35, knows_kung_fu: true, job: "Police Officer";
+            name: "Croki", surname: "Actimel", age: 135,  knows_kung_fu: false, job: "Pilot";
             # No job :(
-            name: "Bob", surname: "Bob", age: 9000;
-            name: "Suzuki", surname: "Satoru", age: 45, job: "Salaryman";
+            name: "Bob", surname: "Bob",  knows_kung_fu: false, age: 9000;
+            name: "Suzuki", surname: "Satoru", age: 45,  knows_kung_fu: false, job: "Salaryman";
         );
 
         from Person get @Id, *;
         # RowAttribute --^   ^-- Gets all rows.
 
-        from Person get @Id, job as "Jabba job";
-        #   Just a column ----^
+        #   Just a column ----v
+        from Person get @Id, job as "Jabba job" where age > 40;
+        
     "#;
 
     let mut database = Database::new();
 
     let tokens = TokenIter::new(src);
-    let commands = CommandIter::new(tokens);
-    for command in commands
+    for command in CommandIter::new(tokens)
         .collect::<Result<Vec<_>, _>>()
         .expect("syntax error")
     {
         let output = database.run_command(command).expect("run error");
-        println!("{output}");
+        println!("{output}\n");
     }
 }

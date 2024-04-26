@@ -1,10 +1,5 @@
+use super::token::{Keyword, Token};
 use parse_display_derive::Display;
-
-use super::{
-    token::{Keyword, Token},
-    Value,
-};
-
 use std::{ops::Range, str::FromStr};
 
 pub type Result = std::result::Result<Token, TokenizeError>;
@@ -72,7 +67,7 @@ impl<'a> TokenIter<'a> {
                                 return Err(TokenizeError::NonUTF8);
                             };
 
-                            return Ok(Token::Literal(Value::Str(str)));
+                            return Ok(Token::StrLiteral(str));
                         }
                         byte => bytes.push(byte),
                     }
@@ -100,13 +95,13 @@ impl<'a> TokenIter<'a> {
                         return Err(TokenizeError::InvalidFloatLiteral);
                     };
 
-                    return Ok(Token::Literal(Value::Float(float)));
+                    return Ok(Token::FloatLiteral(float));
                 }
 
                 let Ok(int) = unsafe { std::str::from_utf8_unchecked(&bytes) }.parse() else {
                     return Err(TokenizeError::InvalidIntLiteral);
                 };
-                Ok(Token::Literal(Value::Int(int)))
+                Ok(Token::IntLiteral(int))
             }
             b'*' => Ok(Token::Star),
             b',' => Ok(Token::Comma),
@@ -116,6 +111,21 @@ impl<'a> TokenIter<'a> {
             b'(' => Ok(Token::LeftSmooth),
             b')' => Ok(Token::RightSmooth),
             b'?' => Ok(Token::QuestionMark),
+            b'=' => Ok(Token::Eq),
+            b'<' => match self.peek_byte() {
+                Some(b'=') => {
+                    _ = self.next_byte();
+                    Ok(Token::LessEq)
+                }
+                _ => Ok(Token::Less),
+            },
+            b'>' => match self.peek_byte() {
+                Some(b'=') => {
+                    _ = self.next_byte();
+                    Ok(Token::MoreEq)
+                }
+                _ => Ok(Token::More),
+            },
             b'A'..=b'Z' | b'a'..=b'z' | b'_' | 128.. => {
                 let mut bytes = vec![byte];
                 loop {

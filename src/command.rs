@@ -17,6 +17,7 @@ pub enum Command {
     Get {
         identifier: String,
         selections: Vec<Selection>,
+        filter: Option<Expression>,
     },
 }
 
@@ -25,11 +26,6 @@ pub struct ColumnDefinition {
     pub identifier: String,
     pub optional: bool,
     pub ty: Ty,
-}
-
-#[derive(Debug, Clone)]
-pub enum Expression {
-    Value(Value),
 }
 
 #[derive(Debug, Clone)]
@@ -62,3 +58,29 @@ impl FromStr for RowAttribute {
         })
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum Operator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    Less,
+    LessEq,
+    More,
+    MoreEq,
+}
+
+#[derive(Debug, Clone)]
+pub enum Expression {
+    Value(Value),
+    Enclosed(Box<Expression>),
+    Operation {
+        lhs: Box<Expression>,
+        operator: Operator,
+        rhs: Box<Expression>,
+    },
+}
+
+impl Expression {}

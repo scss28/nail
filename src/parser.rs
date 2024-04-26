@@ -70,8 +70,12 @@ impl<'a> CommandIter<'a> {
         expect_token! {
             self.next_token(),
             "expression",
-            Token::Literal(value) => Expression::Value(value),
-            Token::Keyword(Keyword::Nil) => Expression::Value(Value::Nil)
+            Token::StrLiteral(str) => Expression::Value(Value::Str(str)),
+            Token::IntLiteral(int) => Expression::Value(Value::Int(int)),
+            Token::FloatLiteral(float) => Expression::Value(Value::Float(float)),
+            Token::Keyword(Keyword::Nil) => Expression::Value(Value::Nil),
+            Token::Keyword(Keyword::True) => Expression::Value(Value::Bool(true)),
+            Token::Keyword(Keyword::False) => Expression::Value(Value::Bool(false)),
         }
     }
 
@@ -94,7 +98,7 @@ impl<'a> CommandIter<'a> {
                 self.next_token(),
                 "<identifier>",
                 Token::Identifier(identifier)
-                    | Token::Literal(Value::Str(identifier)) => identifier
+                    | Token::StrLiteral(identifier) => identifier
             }?;
 
             expect_token! {
@@ -122,7 +126,7 @@ impl<'a> CommandIter<'a> {
                     self.next_token(),
                     "<identifier>",
                     Token::Identifier(identifier)
-                        | Token::Literal(Value::Str(identifier)) => identifier
+                        | Token::StrLiteral(identifier)  => identifier
                 }?;
 
                 expect_token! {
@@ -133,13 +137,9 @@ impl<'a> CommandIter<'a> {
 
                 let mut selections = Vec::new();
                 while let Some(token) = self.peek_token() {
-                    if let Ok(Token::SemiColon) = token {
-                        break;
-                    }
-
                     if !selections.is_empty() {
                         let Ok(Token::Comma) = token else {
-                            return Err(ParseError::ExpectedToken(",".to_owned()));
+                            break;
                         };
 
                         _ = self.next_token();
@@ -149,7 +149,7 @@ impl<'a> CommandIter<'a> {
                         self.next_token(),
                         "* or <column name> or @<row attribute>",
                         Token::Identifier(column)
-                            | Token::Literal(Value::Str(column)) => {
+                            | Token::StrLiteral(column) => {
                             let identifier = if let Some(
                                 Ok(Token::Keyword(Keyword::As))
                             ) = self.peek_token() {
@@ -158,7 +158,7 @@ impl<'a> CommandIter<'a> {
                                     self.next_token(),
                                     "<identifier>",
                                     Token::Identifier(identifier)
-                                    | Token::Literal(Value::Str(identifier)) => {
+                                    | Token::StrLiteral(identifier) => {
                                         identifier
                                     }
                                 }?)
@@ -177,7 +177,7 @@ impl<'a> CommandIter<'a> {
                                 self.next_token(),
                                 "<row attribute>",
                                 Token::Identifier(identifier)
-                                    | Token::Literal(Value::Str(identifier)) => identifier
+                                    | Token::StrLiteral(identifier) => identifier
                             }?;
 
                             let Ok(attribute) = RowAttribute::from_str(&attribute) else  {
@@ -192,7 +192,7 @@ impl<'a> CommandIter<'a> {
                                     self.next_token(),
                                     "<identifier>",
                                     Token::Identifier(identifier)
-                                    | Token::Literal(Value::Str(identifier)) => {
+                                    | Token::StrLiteral(identifier) => {
                                         identifier
                                     }
                                 }?)
@@ -209,9 +209,18 @@ impl<'a> CommandIter<'a> {
                     }?);
                 }
 
+                let filter = match self.peek_token() {
+                    Some(Ok(Token::Keyword(Keyword::Where))) => {
+                        _ = self.next_token();
+                        Some(Expression::Value(Value::Bool(true)))
+                    }
+                    _ => None,
+                };
+
                 Command::Get {
                     identifier,
                     selections,
+                    filter,
                 }
             }
             Keyword::New => {
@@ -225,7 +234,7 @@ impl<'a> CommandIter<'a> {
                     self.next_token(),
                     "<identifier>",
                     Token::Identifier(identifier)
-                        | Token::Literal(Value::Str(identifier)) => identifier
+                        | Token::StrLiteral(identifier) => identifier
                 }?;
 
                 let mut definitions = Vec::new();
@@ -246,7 +255,7 @@ impl<'a> CommandIter<'a> {
                         self.next_token(),
                         "<identifier>",
                         Token::Identifier(identifier)
-                            | Token::Literal(Value::Str(identifier)) => identifier
+                            | Token::StrLiteral(identifier) => identifier
                     }?;
 
                     expect_token! {
@@ -261,6 +270,7 @@ impl<'a> CommandIter<'a> {
                         Token::Keyword(Keyword::Str) => Ty::Str,
                         Token::Keyword(Keyword::Int) => Ty::Int,
                         Token::Keyword(Keyword::Float) => Ty::Float,
+                        Token::Keyword(Keyword::Bool) => Ty::Bool,
                     }?;
 
                     let optional = if matches!(self.peek_token(), Some(Ok(Token::QuestionMark))) {
@@ -287,7 +297,7 @@ impl<'a> CommandIter<'a> {
                     self.next_token(),
                     "<identifier>",
                     Token::Identifier(identifier)
-                        | Token::Literal(Value::Str(identifier)) => identifier
+                        | Token::StrLiteral(identifier) => identifier
                 }?;
 
                 let mut insertions = Vec::new();

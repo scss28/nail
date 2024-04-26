@@ -1,9 +1,10 @@
-use super::Value;
 use std::str::FromStr;
 
 #[derive(Debug, Clone)]
 pub enum Token {
-    Literal(Value),
+    StrLiteral(String),
+    IntLiteral(i32),
+    FloatLiteral(f32),
     Identifier(String),
     Keyword(Keyword),
     Star,
@@ -14,6 +15,11 @@ pub enum Token {
     LeftSmooth,
     RightSmooth,
     QuestionMark,
+    Eq,
+    More,
+    MoreEq,
+    Less,
+    LessEq,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -24,12 +30,18 @@ pub enum Keyword {
     New,
     Insert,
     As,
+    Where,
     // Types
     // -----@
     Str,
     Int,
     Float,
+    Bool,
     Nil,
+    // Bool literals
+    // -------------@
+    True,
+    False,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -45,12 +57,18 @@ impl FromStr for Keyword {
             "new" => Keyword::New,
             "insert" => Keyword::Insert,
             "as" => Keyword::As,
+            "where" => Keyword::Where,
             // Types
             // -----@
             "str" => Keyword::Str,
             "int" => Keyword::Int,
             "float" => Keyword::Float,
             "nil" => Keyword::Nil,
+            "bool" => Keyword::Bool,
+            // Bool literals
+            // -------------@
+            "true" => Keyword::True,
+            "false" => Keyword::False,
             _ => return Err(NoSuchKeywordError),
         })
     }
