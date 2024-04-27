@@ -1,15 +1,12 @@
-use std::{collections::HashMap, ops::Range};
-
-use parse_display_derive::Display;
-
-use crate::{command::Operator, Ty};
-
 use super::{
     command::{ColumnDefinition, Command, Expression, Selection},
     lexer::{self, TokenIter, TokenizeError},
     token::{Keyword, Token},
     Value,
 };
+use crate::{command::Operator, Ty};
+use parse_display_derive::Display;
+use std::{collections::HashMap, ops::Range};
 
 #[derive(Debug, Display, Clone)]
 pub enum ParseError {
@@ -25,18 +22,6 @@ impl From<TokenizeError> for ParseError {
     fn from(value: TokenizeError) -> Self {
         Self::TokenizeError(value)
     }
-}
-
-macro_rules! expect_token {
-    ($expr:expr, $msg:expr, $($pat:pat => $pat_expr:expr),* $(,)?) => {
-        match $expr {
-            $(
-                Some(Ok($pat)) => Ok($pat_expr),
-            )*
-            Some(Err(err)) => Err(err.into()),
-            _ => Err(ParseError::ExpectedToken($msg.into())),
-        }
-    };
 }
 
 pub struct CommandIter<'a> {
@@ -66,16 +51,39 @@ impl<'a> CommandIter<'a> {
             .as_ref()
     }
 
+    fn peek_value(&mut self) -> Option<Value> {
+        Some(match self.peek_token() {
+            Some(Ok(Token::StrLiteral(str))) => Value::Str(str.clone()),
+            Some(Ok(Token::IntLiteral(int))) => Value::Int(*int),
+            Some(Ok(Token::FloatLiteral(float))) => Value::Float(*float),
+            Some(Ok(Token::Keyword(Keyword::Nil))) => Value::Nil,
+            Some(Ok(Token::Keyword(Keyword::True))) => Value::Bool(true),
+            Some(Ok(Token::Keyword(Keyword::False))) => Value::Bool(false),
+            _ => return None,
+        })
+    }
+
     fn next_single_expression(&mut self) -> Result<Expression, ParseError> {
-        expect_token! {
+        if let Some(value) = self.peek_value() {
+            _ = self.next_token();
+            return Ok(Expression::Value(value));
+        }
+
+        crate::expect_token! {
             self.next_token(),
             "expression",
-            Token::StrLiteral(str) => Expression::Value(Value::Str(str)),
-            Token::IntLiteral(int) => Expression::Value(Value::Int(int)),
-            Token::FloatLiteral(float) => Expression::Value(Value::Float(float)),
-            Token::Keyword(Keyword::Nil) => Expression::Value(Value::Nil),
-            Token::Keyword(Keyword::True) => Expression::Value(Value::Bool(true)),
-            Token::Keyword(Keyword::False) => Expression::Value(Value::Bool(false)),
+            Token::Identifier(identifier)
+                | Token::StrLiteral(identifier) => Expression::Identifier(identifier),
+            Token::LeftSmooth => {
+                let expression = self.next_expression()?;
+                crate::expect_token! {
+                    self.next_token(),
+                    ")",
+                    Token::RightSmooth => {}
+                }?;
+
+                expression
+            }
         }
     }
 
@@ -83,35 +91,23 @@ impl<'a> CommandIter<'a> {
         let mut expression = self.next_single_expression()?;
         loop {
             let operator = match self.peek_token() {
-                Some(Ok(token)) => match token {
-                    Token::Eq => {
+                Some(Ok(token)) => match Operator::try_from(token) {
+                    Ok(operator) => {
                         _ = self.next_token();
-                        Operator::Eq
+                        operator
                     }
-                    Token::Less => {
-                        _ = self.next_token();
-                        Operator::Less
-                    }
-                    Token::More => {
-                        _ = self.next_token();
-                        Operator::More
-                    }
-                    _ => break,
+                    Err(_) => break,
                 },
                 _ => break,
             };
 
-            expression = Expression::Operation {
-                lhs: Box::new(expression),
-                operator,
-                rhs: Box::new(self.next_single_expression()?),
-            };
+            expression = expression.extended(operator, self.next_single_expression()?);
         }
 
         Ok(expression)
     }
 
-    fn next_insertion(&mut self) -> Result<HashMap<String, Expression>, ParseError> {
+    fn next_insertion(&mut self) -> Result<HashMap<String, Value>, ParseError> {
         let mut insertion = HashMap::new();
         while let Some(token) = self.peek_token() {
             if let Ok(Token::SemiColon) = token {
@@ -126,20 +122,26 @@ impl<'a> CommandIter<'a> {
                 _ = self.next_token();
             }
 
-            let identifier = expect_token! {
+            let identifier = crate::expect_token! {
                 self.next_token(),
                 "<identifier>",
                 Token::Identifier(identifier)
                     | Token::StrLiteral(identifier) => identifier
             }?;
 
-            expect_token! {
+            crate::expect_token! {
                 self.next_token(),
                 ":",
                 Token::Colon => {}
             }?;
 
-            insertion.insert(identifier, self.next_expression()?);
+            let Some(value) = self.peek_value() else {
+                _ = self.next_token();
+                return Err(ParseError::ExpectedToken("value".to_owned()));
+            };
+
+            _ = self.next_token();
+            insertion.insert(identifier, value);
         }
 
         Ok(insertion)
@@ -152,60 +154,44 @@ impl<'a> CommandIter<'a> {
             ));
         };
 
-        let command = match keyword {
-            Keyword::From => {
-                let identifier = expect_token! {
+        match keyword {
+            Keyword::Get => {
+                let identifier = crate::expect_token! {
                     self.next_token(),
                     "<identifier>",
                     Token::Identifier(identifier)
                         | Token::StrLiteral(identifier)  => identifier
                 }?;
 
-                expect_token! {
-                    self.next_token(),
-                    "get",
-                    Token::Keyword(Keyword::Get) => {}
-                }?;
-
-                let mut selections = Vec::new();
-                while let Some(token) = self.peek_token() {
-                    if !selections.is_empty() {
-                        let Ok(Token::Comma) = token else {
-                            break;
-                        };
-
+                let selections = match self.peek_token() {
+                    Some(Ok(Token::Keyword(Keyword::Select))) => {
                         _ = self.next_token();
-                    }
 
-                    selections.push(expect_token! {
-                        self.next_token(),
-                        "* or <column name> or @<row attribute>",
-                        Token::Identifier(column)
-                            | Token::StrLiteral(column) => {
-                            let identifier = if let Some(
-                                Ok(Token::Keyword(Keyword::As))
-                            ) = self.peek_token() {
+                        let mut selections = Vec::new();
+                        while let Some(token) = self.peek_token() {
+                            if !selections.is_empty() {
+                                let Ok(Token::Comma) = token else {
+                                    break;
+                                };
+
                                 _ = self.next_token();
-                                Some(expect_token! {
-                                    self.next_token(),
-                                    "<identifier>",
-                                    Token::Identifier(identifier)
-                                    | Token::StrLiteral(identifier) => {
-                                        identifier
-                                    }
-                                }?)
-                            } else {
-                                None
-                            };
-
-                            Selection::Column {
-                                column,
-                                identifier
                             }
-                        },
-                        Token::Star => Selection::All,
-                    }?);
-                }
+
+                            selections.push(crate::expect_token! {
+                                self.next_token(),
+                                "* or <column name> or @<row attribute>",
+                                Token::Identifier(identifier)
+                                    | Token::StrLiteral(identifier) => {
+                                    Selection::Identifier { identifier }
+                                },
+                                Token::Star => Selection::All,
+                            }?);
+                        }
+
+                        selections
+                    }
+                    _ => vec![Selection::All],
+                };
 
                 let filter = match self.peek_token() {
                     Some(Ok(Token::Keyword(Keyword::Where))) => {
@@ -215,20 +201,20 @@ impl<'a> CommandIter<'a> {
                     _ => None,
                 };
 
-                Command::Get {
+                Ok(Command::Get {
                     identifier,
                     selections,
                     filter,
-                }
+                })
             }
             Keyword::New => {
-                expect_token! {
+                crate::expect_token! {
                     self.next_token(),
                     "table",
                     Token::Keyword(Keyword::Table) => {}
                 }?;
 
-                let identifier = expect_token! {
+                let identifier = crate::expect_token! {
                     self.next_token(),
                     "<identifier>",
                     Token::Identifier(identifier)
@@ -249,20 +235,20 @@ impl<'a> CommandIter<'a> {
                         _ = self.next_token();
                     }
 
-                    let identifier = expect_token! {
+                    let identifier = crate::expect_token! {
                         self.next_token(),
                         "<identifier>",
                         Token::Identifier(identifier)
                             | Token::StrLiteral(identifier) => identifier
                     }?;
 
-                    expect_token! {
+                    crate::expect_token! {
                         self.next_token(),
                         ":",
                         Token::Colon => {}
                     }?;
 
-                    let ty = expect_token! {
+                    let ty = crate::expect_token! {
                         self.next_token(),
                         "<type>",
                         Token::Keyword(Keyword::Str) => Ty::Str,
@@ -285,13 +271,13 @@ impl<'a> CommandIter<'a> {
                     });
                 }
 
-                Command::New {
+                Ok(Command::New {
                     identifier,
                     definitions,
-                }
+                })
             }
             Keyword::Insert => {
-                let identifier = expect_token! {
+                let identifier = crate::expect_token! {
                     self.next_token(),
                     "<identifier>",
                     Token::Identifier(identifier)
@@ -300,35 +286,54 @@ impl<'a> CommandIter<'a> {
 
                 let mut insertions = Vec::new();
                 match self.peek_token() {
-                    Some(Ok(Token::LeftSmooth)) => {
+                    Some(Ok(Token::LeftCurly)) => {
                         _ = self.next_token();
-                        while !matches!(self.peek_token(), Some(Ok(Token::RightSmooth)) | None) {
+                        while !matches!(self.peek_token(), Some(Ok(Token::RightCurly)) | None) {
                             insertions.push(self.next_insertion()?);
-                            expect_token! {
+                            crate::expect_token! {
                                 self.next_token(),
                                 ";",
                                 Token::SemiColon => {}
                             }?;
                         }
 
-                        expect_token! {
+                        crate::expect_token! {
                             self.next_token(),
-                            ")",
-                            Token::RightSmooth => {}
+                            "}",
+                            Token::RightCurly => {}
                         }?;
                     }
                     _ => insertions.push(self.next_insertion()?),
                 }
 
-                Command::Insert {
+                Ok(Command::Insert {
                     identifier,
                     insertions,
-                }
+                })
             }
-            _ => return Err(ParseError::ExpectedToken("from / insert / new".to_owned())),
-        };
+            Keyword::Remove => {
+                let identifier = crate::expect_token! {
+                    self.next_token(),
+                    "<identifier>",
+                    Token::Identifier(identifier)
+                        | Token::StrLiteral(identifier) => identifier
+                }?;
 
-        Ok(command)
+                crate::expect_token! {
+                    self.next_token(),
+                    "where",
+                    Token::Keyword(Keyword::Where) => {}
+                }?;
+
+                let expression = self.next_expression()?;
+
+                Ok(Command::Remove {
+                    identifier,
+                    expression,
+                })
+            }
+            _ => Err(ParseError::ExpectedToken("from / insert / new".to_owned())),
+        }
     }
 }
 

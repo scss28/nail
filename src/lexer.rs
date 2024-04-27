@@ -10,7 +10,7 @@ pub enum TokenizeError {
     NonTerminatedStr,
     #[display("Non-UTF-8 text.")]
     NonUTF8,
-    #[display("Character not part of the language grammar.")]
+    #[display("Character not a part of the language grammar.")]
     UnexpectedCharacter,
     #[display("Invalid float literal.")]
     InvalidFloatLiteral,
@@ -103,15 +103,40 @@ impl<'a> TokenIter<'a> {
                 };
                 Ok(Token::IntLiteral(int))
             }
-            b'*' => Ok(Token::Star),
             b',' => Ok(Token::Comma),
             b':' => Ok(Token::Colon),
             b';' => Ok(Token::SemiColon),
             b'@' => Ok(Token::At),
             b'(' => Ok(Token::LeftSmooth),
             b')' => Ok(Token::RightSmooth),
+            b'{' => Ok(Token::LeftCurly),
+            b'}' => Ok(Token::RightCurly),
             b'?' => Ok(Token::QuestionMark),
-            b'=' => Ok(Token::Eq),
+            b'+' => Ok(Token::Plus),
+            b'-' => Ok(Token::Minus),
+            b'*' => Ok(Token::Star),
+            b'/' => Ok(Token::Slash),
+            b'&' => {
+                let Some(b'&') = self.next_byte() else {
+                    return Err(TokenizeError::UnexpectedCharacter);
+                };
+
+                Ok(Token::DoubleAmpersand)
+            }
+            b'|' => {
+                let Some(b'|') = self.next_byte() else {
+                    return Err(TokenizeError::UnexpectedCharacter);
+                };
+
+                Ok(Token::DoublePipe)
+            }
+            b'=' => {
+                let Some(b'=') = self.next_byte() else {
+                    return Err(TokenizeError::UnexpectedCharacter);
+                };
+
+                Ok(Token::DoubleEq)
+            }
             b'<' => match self.peek_byte() {
                 Some(b'=') => {
                     _ = self.next_byte();

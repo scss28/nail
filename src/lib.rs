@@ -5,6 +5,7 @@ pub mod prelude;
 mod command;
 mod database;
 mod lexer;
+mod macros;
 mod parser;
 mod token;
 

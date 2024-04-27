@@ -4,28 +4,47 @@ fn main() {
     let src = br#"
         # To create a table simply:
         new table Person 
-            name: str, 
-            surname: str, 
-            age: int,
-            knows_kung_fu: bool,
-            job: str?; # optional column
+            Name: str, 
+            Surname: str, 
+            Age: int,
+            KnowsKungFu: bool,
+            Job: str?; # optional column
 
-        # To insert some rows simply
-        insert Person (
-            name: "Joe", surname: "Kowalski", age: 35, knows_kung_fu: true, job: "Police Officer";
-            name: "Croki", surname: "Actimel", age: 135,  knows_kung_fu: false, job: "Pilot";
+        # To insert a row simply:
+        insert Person
+            Name: "Joe",
+            Surname: "Kowalski",
+            Age: 35,
+            KnowsKungFu: true,
+            Job: "Police Officer";
+
+        # To insert multiple rows simply:
+        insert Person {
+            Name: "Croki",
+            Surname: "Actimel",
+            Age: 135, 
+            KnowsKungFu: false, 
+            Job: "Pilot";
+            
             # No job :(
-            name: "Bob", surname: "Bob",  knows_kung_fu: false, age: 9000;
-            name: "Suzuki", surname: "Satoru", age: 45,  knows_kung_fu: false, job: "Salaryman";
-        );
+            Name: "Bob",
+            Surname: "Bob",
+            Age: 9000,
+            KnowsKungFu: false;
 
-        #               v-- Identity of the row.
-        from Person get I, *;
-        #                  ^-- Gets all rows.
+            Name: "Suzuki",
+            Surname: "Satoru",
+            Age: 45,
+            KnowsKungFu: false,
+            Job: "Salaryman";
+        };
 
-        # Just a column ----v
-        from Person get I, job as "Jabba job" where age > 40;
-        
+        # Gets all rows.
+        get Person;
+        get Person select Surname, Job where Age > 45;
+
+        remove Person where KnowsKungFu;
+        get Person;
     "#;
 
     let mut database = Database::new();

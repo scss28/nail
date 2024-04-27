@@ -12,13 +12,16 @@ pub enum CommandRunOutput {
     RowsInserted {
         identifier: String,
         count: usize,
-        errs: Vec<OneOf<(InsertionError, NoSuchColumnError)>>,
+        errs: Vec<InsertError>,
     },
     TableCreated {
         identifier: String,
     },
     Selection {
         table: Table,
+    },
+    Removed {
+        count: usize,
     },
 }
 
@@ -30,21 +33,28 @@ impl Display for CommandRunOutput {
                 count,
                 errs,
             } => {
-                if !errs.is_empty() {
-                    for err in errs {
-                        write!(f, "Insertion failed: {err}")?;
-                    }
-
-                    writeln!(f)?;
+                for err in errs {
+                    writeln!(f, "Insertion failed: {err}")?;
                 }
 
-                write!(f, "Inserted {count} rows into table \"{identifier}\".")?;
+                write!(
+                    f,
+                    "Inserted {count} {} into table \"{identifier}\".",
+                    if *count == 1 { "row" } else { "rows" }
+                )?;
                 Ok(())
             }
             CommandRunOutput::TableCreated { identifier } => {
                 write!(f, "Table \"{identifier}\" created.")
             }
             CommandRunOutput::Selection { table } => write!(f, "{table}"),
+            CommandRunOutput::Removed { count } => {
+                write!(
+                    f,
+                    "Removed {count} {}.",
+                    if *count == 1 { "row" } else { "rows" }
+                )
+            }
         }
     }
 }
@@ -64,6 +74,8 @@ pub enum InsertionError {
     #[display("Column \"{column}\" is not optional.")]
     NonOptionalColumn { column: String },
 }
+
+const ID_IDENTIFIER: &str = "Id";
 
 pub struct Database {
     tables: HashMap<String, Table>,
@@ -87,6 +99,7 @@ impl Database {
             NoSuchColumnError,
             ExpectedBoolError,
             CannotEvaluateError,
+            IdInsertError,
         )>,
     > {
         match command {
@@ -94,7 +107,13 @@ impl Database {
                 identifier,
                 definitions,
             } => {
-                let mut columns = Vec::new();
+                let mut columns = vec![Column {
+                    identifier: ID_IDENTIFIER.to_owned(),
+                    ty: Ty::Int,
+                    optional: false,
+                    values: Vec::new(),
+                }];
+
                 for ColumnDefinition {
                     identifier,
                     optional,
@@ -149,19 +168,76 @@ impl Database {
                 let table = table.get(selections, filter).map_err(OneOf::broaden)?;
                 Ok(CommandRunOutput::Selection { table })
             }
+            Command::Remove {
+                identifier,
+                expression,
+            } => {
+                let Some(table) = self.tables.get_mut(&identifier) else {
+                    return Err(OneOf::new(NoSuchTableError(identifier)));
+                };
+
+                let count = table.remove(expression).map_err(OneOf::broaden)?;
+                Ok(CommandRunOutput::Removed { count })
+            }
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct CannotEvaluateError {
-    lhs: Value,
-    operator: Operator,
-    rhs: Value,
+    pub lhs: Value,
+    pub operator: Operator,
+    pub rhs: Value,
 }
 
-#[derive(Debug, Clone, Copy)]
+impl Display for CannotEvaluateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Cannot ")?;
+        match self.operator {
+            Operator::And => {
+                write!(f, "\"and\"")?;
+            }
+            Operator::Or => {
+                write!(f, "\"or\"")?;
+            }
+            Operator::Eq
+            | Operator::Less
+            | Operator::LessEq
+            | Operator::More
+            | Operator::MoreEq => {
+                write!(f, "compare")?;
+            }
+            Operator::Add => {
+                write!(f, "add")?;
+            }
+            Operator::Sub => {
+                write!(f, "subtract")?;
+            }
+            Operator::Mul => {
+                write!(f, "multiply")?;
+            }
+            Operator::Div => {
+                write!(f, "divide")?;
+            }
+        }
+
+        write!(f, " {} and {}", self.lhs.ty(), self.rhs.ty())
+    }
+}
+
+#[derive(Debug, Display, Clone, Copy)]
+#[display("Expected a bool in a \"where\".")]
 pub struct ExpectedBoolError;
+
+#[derive(Debug, Display, Clone, Copy)]
+#[display("Expected a single value.")]
+pub struct ExpectedValueError;
+
+#[derive(Debug, Display, Clone, Copy)]
+#[display("Column \"id\" is only inserted automatically.")]
+pub struct IdInsertError;
+
+pub type InsertError = OneOf<(InsertionError, NoSuchColumnError, IdInsertError)>;
 
 #[derive(Debug, Clone)]
 pub struct Table {
@@ -187,13 +263,37 @@ impl Table {
         first.values.len()
     }
 
-    pub fn get_column(&self, identifier: &str) -> Option<&Column> {
+    pub fn row(&self, index: usize) -> Option<HashMap<String, Value>> {
+        if index >= self.height() {
+            return None;
+        }
+
+        let mut row = HashMap::new();
+        for column in &self.columns {
+            let Column {
+                identifier, values, ..
+            } = column;
+            row.insert(identifier.clone(), values[index].clone());
+        }
+
+        Some(row)
+    }
+
+    pub fn column(&self, identifier: &str) -> Option<&Column> {
         self.columns.iter().find(
             |Column {
                  identifier: column_identifier,
                  ..
              }| *column_identifier == identifier,
         )
+    }
+
+    /// # Panics
+    /// if `index < 0` or `index > self.height()`
+    pub fn remove_row(&mut self, index: usize) {
+        for column in &mut self.columns {
+            column.values.remove(index);
+        }
     }
 
     pub fn get(
@@ -204,25 +304,15 @@ impl Table {
         let mut columns = Vec::new();
         for selection in &selections {
             match selection {
-                Selection::Column { column, .. } => {
-                    if column == "I" {
-                        columns.push(Column {
-                            identifier: "I".to_owned(),
-                            ty: Ty::Int,
-                            optional: false,
-                            values: Vec::new(),
-                        });
-                        continue;
-                    }
-
+                Selection::Identifier { identifier } => {
                     let Some(Column {
                         identifier,
                         ty,
                         optional,
                         ..
-                    }) = self.get_column(column)
+                    }) = self.column(identifier)
                     else {
-                        return Err(OneOf::new(NoSuchColumnError(column.clone())));
+                        return Err(OneOf::new(NoSuchColumnError(identifier.clone())));
                     };
 
                     columns.push(Column {
@@ -252,17 +342,9 @@ impl Table {
         }
 
         for i in 0..self.height() {
-            let mut row = HashMap::from([("I".to_owned(), Value::Int(i as i32))]);
-            for column in &self.columns {
-                let Column {
-                    identifier, values, ..
-                } = column;
-                row.insert(identifier.clone(), values[i].clone());
-            }
-
+            let row = self.row(i).unwrap(); // 0..self.height() must exist
             if let Some(expression) = filter.clone() {
-                let Value::Bool(bool) =
-                    Self::evaluate(expression, i, &row).map_err(OneOf::broaden)?
+                let Value::Bool(bool) = Self::evaluate(expression, &row).map_err(OneOf::broaden)?
                 else {
                     return Err(OneOf::new(ExpectedBoolError));
                 };
@@ -287,31 +369,32 @@ impl Table {
         Ok(Table { columns })
     }
 
-    pub fn insert(
-        &mut self,
-        insertion: HashMap<String, Expression>,
-    ) -> Result<(), OneOf<(InsertionError, NoSuchColumnError)>> {
-        let insertion = insertion
-            .into_iter()
-            .map(|(identifier, expression)| {
-                (
-                    identifier,
-                    match expression {
-                        Expression::Value(value) => value,
-                        Expression::Enclosed(_) => todo!(),
-                        Expression::Operation {
-                            lhs: _,
-                            operator: _,
-                            rhs: _,
-                        } => todo!(),
-                        Expression::Identifier(_) => todo!(),
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
-
+    pub fn insert(&mut self, mut insertion: HashMap<String, Value>) -> Result<(), InsertError> {
         // Insertion validation.
         // ---------------------@
+        if insertion.contains_key(ID_IDENTIFIER) {
+            return Err(OneOf::new(IdInsertError));
+        }
+
+        let last_id = {
+            if self.height() == 0 {
+                0
+            } else {
+                let Value::Int(id) = self
+                    .column(ID_IDENTIFIER)
+                    .expect("column Id does not exist?")
+                    .values
+                    .last()
+                    .expect("?")
+                else {
+                    panic!("Id is not an int?")
+                };
+
+                *id as i32 + 1
+            }
+        };
+        insertion.insert(ID_IDENTIFIER.to_owned(), Value::Int(last_id));
+
         let mut columns = self
             .columns
             .iter()
@@ -350,6 +433,7 @@ impl Table {
             }
         }
         // ---------------------@
+
         let mut columns = self
             .columns
             .iter_mut()
@@ -376,17 +460,35 @@ impl Table {
         Ok(())
     }
 
-    /// # Panics
-    /// if `index < 0` or `index > self.height()`
-    pub fn remove_row(&mut self, index: usize) {
-        for column in &mut self.columns {
-            column.values.remove(index);
+    pub fn remove(
+        &mut self,
+        expression: Expression,
+    ) -> Result<usize, OneOf<(ExpectedBoolError, CannotEvaluateError, NoSuchColumnError)>> {
+        let mut remove_indices = Vec::new();
+        for i in 0..self.height() {
+            let row = self.row(i).expect("?");
+            let Value::Bool(bool) =
+                Self::evaluate(expression.clone(), &row).map_err(OneOf::broaden)?
+            else {
+                return Err(OneOf::new(ExpectedBoolError));
+            };
+
+            if bool {
+                remove_indices.push(i);
+            }
         }
+
+        let count = remove_indices.len();
+        for (i, index) in remove_indices.into_iter().enumerate() {
+            // Need to offset indices after every removal.
+            self.remove_row(index - i);
+        }
+
+        Ok(count)
     }
 
     fn evaluate(
         expression: Expression,
-        index: usize,
         row: &HashMap<String, Value>,
     ) -> Result<Value, OneOf<(CannotEvaluateError, NoSuchColumnError)>> {
         match expression {
@@ -398,41 +500,55 @@ impl Table {
 
                 Ok(value.clone())
             }
-            Expression::Enclosed(expression) => Self::evaluate(*expression, index, row),
+            Expression::Enclosed(expression) => Self::evaluate(*expression, row),
             Expression::Operation { lhs, operator, rhs } => {
-                let lhs = Self::evaluate(*lhs, index, row)?;
-                let rhs = Self::evaluate(*rhs, index, row)?;
-                match operator {
-                    Operator::Add => todo!(),
-                    Operator::Sub => todo!(),
-                    Operator::Mul => todo!(),
-                    Operator::Div => todo!(),
-                    Operator::Eq => match (lhs, rhs) {
-                        (Value::Str(lhs), Value::Str(rhs)) => Ok(Value::Bool(lhs == rhs)),
-                        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Bool(lhs == rhs)),
-                        (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Bool(lhs == rhs)),
-                        (lhs, rhs) => Err(OneOf::new(CannotEvaluateError { lhs, operator, rhs })),
-                    },
-                    Operator::Less => match (lhs, rhs) {
-                        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Bool(lhs < rhs)),
-                        (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Bool(lhs < rhs)),
-                        (lhs, rhs) => Err(OneOf::new(CannotEvaluateError { lhs, operator, rhs })),
-                    },
-                    Operator::LessEq => match (lhs, rhs) {
-                        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Bool(lhs <= rhs)),
-                        (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Bool(lhs <= rhs)),
-                        (lhs, rhs) => Err(OneOf::new(CannotEvaluateError { lhs, operator, rhs })),
-                    },
-                    Operator::More => match (lhs, rhs) {
-                        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Bool(lhs > rhs)),
-                        (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Bool(lhs > rhs)),
-                        (lhs, rhs) => Err(OneOf::new(CannotEvaluateError { lhs, operator, rhs })),
-                    },
-                    Operator::MoreEq => match (lhs, rhs) {
-                        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Bool(lhs > rhs)),
-                        (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Bool(lhs > rhs)),
-                        (lhs, rhs) => Err(OneOf::new(CannotEvaluateError { lhs, operator, rhs })),
-                    },
+                crate::operator_map! {
+                    Self::evaluate(*lhs, row)?,
+                    operator,
+                    Self::evaluate(*rhs, row)?,
+                    Add {
+                        Int(lhs), Int(rhs) => Value::Int(lhs + rhs)
+                        Float(lhs), Float(rhs) => Value::Float(lhs + rhs)
+                    }
+                    Sub {
+                        Int(lhs), Int(rhs) => Value::Int(lhs - rhs)
+                        Float(lhs), Float(rhs) => Value::Float(lhs - rhs)
+                    }
+                    Mul {
+                        Int(lhs), Int(rhs) => Value::Int(lhs * rhs)
+                        Float(lhs), Float(rhs) => Value::Float(lhs * rhs)
+                    }
+                    Div {
+                        Int(lhs), Int(rhs) => Value::Int(lhs / rhs)
+                        Float(lhs), Float(rhs) => Value::Float(lhs / rhs)
+                    }
+                    Eq {
+                        Int(lhs), Int(rhs) => Value::Bool(lhs == rhs)
+                        Float(lhs), Float(rhs) => Value::Bool(lhs == rhs)
+                        Str(lhs), Str(rhs) => Value::Bool(lhs == rhs)
+                    }
+                    Less {
+                        Int(lhs), Int(rhs) => Value::Bool(lhs < rhs)
+                        Float(lhs), Float(rhs) => Value::Bool(lhs < rhs)
+                    }
+                    LessEq {
+                        Int(lhs), Int(rhs) => Value::Bool(lhs <= rhs)
+                        Float(lhs), Float(rhs) => Value::Bool(lhs <= rhs)
+                    }
+                    More {
+                        Int(lhs), Int(rhs) => Value::Bool(lhs > rhs)
+                        Float(lhs), Float(rhs) => Value::Bool(lhs == rhs)
+                    }
+                    MoreEq {
+                        Int(lhs), Int(rhs) => Value::Bool(lhs >= rhs)
+                        Float(lhs), Float(rhs) => Value::Bool(lhs >= rhs)
+                    }
+                    And {
+                        Bool(lhs), Bool(rhs) => Value::Bool(lhs && rhs)
+                    }
+                    Or {
+                        Bool(lhs), Bool(rhs) => Value::Bool(lhs || rhs)
+                    }
                 }
             }
         }
@@ -453,22 +569,6 @@ impl Display for Table {
         }
 
         const PADDING: usize = 1;
-        let draw_line = |f: &mut std::fmt::Formatter<'_>, char: char| -> std::fmt::Result {
-            write!(f, ".")?;
-            for max_width in &max_widths {
-                for _ in 0..max_width + PADDING * 2 {
-                    write!(f, "{char}")?;
-                }
-
-                write!(f, ".")?;
-            }
-
-            Ok(())
-        };
-
-        draw_line(f, '.')?;
-        writeln!(f)?;
-
         write!(f, "|")?;
         for (Column { identifier, .. }, max_width) in self.columns.iter().zip(&max_widths) {
             for _ in 0..PADDING {
@@ -483,9 +583,14 @@ impl Display for Table {
             write!(f, "|")?;
         }
         writeln!(f)?;
-        draw_line(f, '.')?;
-        writeln!(f)?;
-        draw_line(f, '-')?;
+        write!(f, "+")?;
+        for max_width in &max_widths {
+            for _ in 0..max_width + PADDING * 2 {
+                write!(f, "-")?;
+            }
+
+            write!(f, "+")?;
+        }
 
         for j in 0..self.height() {
             writeln!(f)?;
@@ -503,8 +608,6 @@ impl Display for Table {
 
                 write!(f, "|")?;
             }
-            writeln!(f)?;
-            draw_line(f, '-')?;
         }
 
         Ok(())

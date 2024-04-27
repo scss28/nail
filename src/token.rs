@@ -7,30 +7,40 @@ pub enum Token {
     FloatLiteral(f32),
     Identifier(String),
     Keyword(Keyword),
-    Star,
     Comma,
     Colon,
     SemiColon,
     At,
     LeftSmooth,
     RightSmooth,
+    LeftCurly,
+    RightCurly,
     QuestionMark,
-    Eq,
+    // Operators
+    // ---------@
+    DoubleEq,
     More,
     MoreEq,
     Less,
     LessEq,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    DoubleAmpersand,
+    DoublePipe,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum Keyword {
     Get,
-    From,
+    Select,
     Table,
     New,
     Insert,
     As,
     Where,
+    Remove,
     // Types
     // -----@
     Str,
@@ -52,12 +62,13 @@ impl FromStr for Keyword {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
             "get" => Keyword::Get,
-            "from" => Keyword::From,
+            "select" => Keyword::Select,
             "table" => Keyword::Table,
             "new" => Keyword::New,
             "insert" => Keyword::Insert,
             "as" => Keyword::As,
             "where" => Keyword::Where,
+            "remove" => Keyword::Remove,
             // Types
             // -----@
             "str" => Keyword::Str,
